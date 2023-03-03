@@ -1,7 +1,7 @@
 import Foundation
 
 /// Life-Cycle events for background services
-public protocol BackgroundServiceDelegate {
+public protocol BackgroundServiceDelegate: NSObjectProtocol {
     /// Informs the delegate that the background service has finished launching.
     func backgroundServiceDidFinishLaunching()
 

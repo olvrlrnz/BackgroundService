@@ -56,7 +56,7 @@ public class BackgroundService {
     /// The default instance
     static let `default` = BackgroundService()
     /// An instance of the class to run in the background
-    private var instance: BackgroundServicable?
+    private var instance: NSObjectProtocol?
     /// A list of active signal sources
     private var signalSources = [DispatchSourceSignal]()
     /// Condition for the loop in `BackgroundService.run(type:arguments:)`.
@@ -72,7 +72,7 @@ public class BackgroundService {
             preconditionFailure("Info.plist does not contain a valid \"NSPrincipalClass\" entry")
         }
 
-        guard let clazz = NSClassFromString(clazzName) as? BackgroundServicable.Type else {
+        guard let clazz = NSClassFromString(clazzName) else {
             preconditionFailure("\"\(clazzName)\" does not conform to \"BackgroundServicable\"")
         }
 
@@ -89,11 +89,23 @@ public class BackgroundService {
     /// - Parameters:
     ///   - type: The type of the object to run
     ///   - arguments: An array of command line arguments
-    private func run(type: BackgroundServicable.Type, arguments: [String]) {
+    private func run(type: AnyClass, arguments: [String]) {
         self.setupSignalHandlers()
 
-        self.instance = type.init(arguments: arguments)
-        self.instance?.backgroundServiceDidFinishLaunching()
+        let selector = NSSelectorFromString("init")
+
+        if let type = type as? BackgroundServiceInitializable.Type {
+            self.instance = type.init(arguments: arguments)
+        } else if type.responds(to: selector) {
+            self.instance = type.alloc() as? NSObjectProtocol
+            self.instance?.perform(selector)
+        } else {
+            abort()
+        }
+
+        if let instance = self.instance as? BackgroundServiceDelegate {
+            instance.backgroundServiceDidFinishLaunching()
+        }
 
         repeat {
             if !RunLoop.current.run(mode: .default, before: .distantFuture) {
@@ -106,7 +118,10 @@ public class BackgroundService {
             $0.cancel()
         }
 
-        self.instance?.backgroundServiceWillTerminate()
+        if let instance = self.instance as? BackgroundServiceDelegate {
+            instance.backgroundServiceWillTerminate()
+        }
+
         self.instance = nil
 
         Darwin.exit(EXIT_SUCCESS)
@@ -119,10 +134,14 @@ public class BackgroundService {
             handler: { self.shouldTerminate = true }
         )
 
+        guard let instance = self.instance as? BackgroundServiceDelegate else {
+            return
+        }
+
         for signum in [SIGHUP, SIGINT, SIGCHLD, SIGUSR1, SIGUSR2] {
             self.setupSignalHandler(
                 forSignal: signum,
-                handler: { self.instance?.backgroundServiceDidReceiveSignal(signum) }
+                handler: { instance.backgroundServiceDidReceiveSignal(signum) }
             )
         }
     }
